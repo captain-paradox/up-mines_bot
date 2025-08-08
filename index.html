@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="hi">
+  <head>
+    <meta charset="UTF-8" />
+    <title>द्वितीय प्रति - वाहन पंजीकरण</title>
+    <style>
+      @font-face {
+        font-family: "NotoSansDevanagari";
+        src: url("file:///absolute/path/to/NotoSansDevanagari-Regular.ttf")
+          format("truetype");
+      }
+      body {
+        font-family: "NotoSansDevanagari", Arial, sans-serif;
+        margin: 20px;
+        color: #222;
+        font-size: 8px;
+        position: relative;
+      }
+      h1 {
+        text-align: center;
+        font-size: 16px;
+        padding: 10px;
+        margin-bottom: 20px;
+      }
+      .section {
+        margin: 1px 0;
+      }
+      .row {
+        display: flex;
+        margin: 1px 0;
+      }
+      .line {
+        display: flex;
+        width: 40%;
+        box-sizing: border-box;
+        padding-right: 8px;
+        align-items: center;
+        margin: 1px 0;
+      }
+      .label {
+        width: 120px;
+        font-weight: bold;
+        color: #333;
+        flex-shrink: 1;
+      }
+      .value {
+        flex: 1;
+        font-size: 6px;
+      }
+      .box {
+        padding: 10px;
+      }
+      .section-title {
+        text-align: center;
+        font-weight: bold;
+        padding: 1px 1px;
+        margin: 1px 0 1px;
+      }
+
+      .qr-top-right {
+        position: absolute;
+        top: 10px;
+        right: 20px;
+      }
+      .qr-top-right img {
+        width: 60px;
+        height: 60px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="qr-top-right">
+      <img src="${qr_code_base64}" alt="QR Code" />
+    </div>
+
+    <h1>द्वितीय प्रति (परिवहनकर्ता/उपभोक्ता/भण्डारण/कार्यदायी संस्था हेतु)</h1>
+
+    <div class="box section">
+      <div class="row">
+        <div class="line">
+          <span class="label"> </span><span class="value"> </span>
+        </div>
+        <div class="line">
+          <span class="label">1. eMM11:</span>
+          <span class="value">${lbl_etpNo}</span>
+        </div>
+        <div class="line">
+          <span class="label">2. LesseeId:</span>
+          <span class="value">${lbl_LeaseId}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="line">
+          <span class="label">3. Name of lessee / Permit holder:</span>
+          <span class="value">${lbl_name_of_lease}</span>
+        </div>
+        <div class="line">
+          <span class="label">4. Mobile Number Of Lessee:</span>
+          <span class="value">${lbl_mobile_no}</span>
+        </div>
+        <div class="line">
+          <span class="label">5. Lease Details [Address, Village,(Gata/Khand),Area]:</span>
+          <span class="value">${lbl_leaseDetails}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="line">
+          <span class="label">6. Tehsil Of Lease:</span>
+          <span class="value">${lbl_tehsil}</span>
+        </div>
+        <div class="line">
+          <span class="label">7. District of Lease:</span>
+          <span class="value">${lbl_district}</span>
+        </div>
+        <div class="line">
+          <span class="label">8. Qty Transported:</span>
+          <span class="value">${lbl_qty_to_Transport}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="line">
+          <span class="label">9. Mineral Name:</span>
+          <span class="value">${lbl_type_of_mining_mineral}</span>
+        </div>
+        <div class="line">
+          <span class="label">10. Loading From:</span>
+          <span class="value">${lbl_loadingfrom}</span>
+        </div>
+        <div class="line">
+          <span class="label">11. Destination:</span>
+          <span class="value">${lbl_destination_address}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="line">
+          <span class="label">12. Distance:</span>
+          <span class="value">${lbl_distrance} KM</span>
+        </div>
+        <div class="line">
+          <span class="label">13. Generated On:</span>
+          <span class="value">${txt_etp_generated_on}</span>
+        </div>
+        <div class="line">
+          <span class="label">14. Valid Upto:</span>
+          <span class="value">${txt_etp_valid_upto}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="line">
+          <span class="label">15. Duration:</span>
+          <span class="value">${lbl_travel_duration}</span>
+        </div>
+        <div class="line">
+          <span class="label">16. Destination District:</span>
+          <span class="value">${lbl_destination_district}</span>
+        </div>
+        <div class="line">
+          <span class="label">17. Pit Mouth Value:</span>
+          <span class="value">${pit}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="line">
+          <span class="label">18. Serial No.:</span>
+          <span class="value">${lbl_SerialNumber}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Details Of Registered Vehicle</div>
+
+    <div class="box section">
+      <div class="row">
+        <div class="line">
+          <span class="label">1. Reg. No.:</span>
+          <span class="value">${lbl_registraton_number_of_vehicle}</span>
+        </div>
+        <div class="line">
+          <span class="label">2. Driver Name:</span>
+          <span class="value">${lbl_name_of_driver}</span>
+        </div>
+        <div class="line">
+          <span class="label">3. Driver Mobile:</span>
+          <span class="value">${lbl_mobile_number_of_driver}</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="line">
+          <span class="label">4. Gross Vehicle Weight in Tonne:</span>
+          <span class="value">${lbl_rc_gvw}</span>
+        </div>
+        <div class="line">
+          <span class="label">5. Carrying capacity of vehicle in Tonne:</span>
+          <span class="value">${lbl_v_cap}</span>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
