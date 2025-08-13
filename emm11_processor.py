@@ -58,18 +58,19 @@ async def process_emm11(
             except Exception as e:
                 await log(f"⚠️ TP Number: {tp_num} - Failed to process due to: {e}")
 
-        if tp_num_list:
-            await log(f"📄 Generating PDF for {len(tp_num_list)} eligible TP numbers...")
-            pdf_path = await pdf_gen(tp_num_list)
+        # if tp_num_list:
+        #     await log(f"📄 Generating PDF for {len(tp_num_list)} eligible TP numbers...")
+        #     # pdf_path = await pdf_gen(tp_num_list)
 
-            if send_pdf_callback and user_id:
-                await send_pdf_callback(user_id, pdf_path)
+        #     if send_pdf_callback and user_id:
+        #         await send_pdf_callback(user_id, pdf_path)
 
-            # Optional cleanup
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-        else:
-            await log("ℹ️ No eligible TP numbers found for PDF generation.")
+        #     # Optional cleanup
+        #     if os.path.exists(pdf_path):
+        #         os.remove(pdf_path)
+        # else:
+        #     await log("ℹ️ No eligible TP numbers found for PDF generation.")
 
     except Exception as e:
-        await log(f"🔥 Fatal error in process_emm11: {e}")
+        print("Error:",e)
+        # await log(f"🔥 Fatal error in process_emm11: {e}")

@@ -173,7 +173,7 @@ async def create_qr_image_base64(tp_num, url):
         logger.exception(f"❌ Exception while generating QR for TP {tp_num}: {e}")
         raise
 
-async def pdf_gen(tp_num_list, template_path="form_template.pdf", log_callback=None, send_pdf_callback=None):
+async def pdf_gen(tp_num_list, output_dir="pdf",template_path="form_template.pdf", log_callback=None, send_pdf_callback=None):
     if not tp_num_list:
         logger.info("ℹ️ No TP numbers provided.")
         return []

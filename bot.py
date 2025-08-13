@@ -250,8 +250,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async def generate():
             try:
                 async with session["lock"]:
-                    # If pdf_gen is CPU/IO heavy sync, wrap it:
-                    # await asyncio.to_thread(pdf_gen, tp_list, output_dir=session["pdf_dir"], log_callback=..., send_pdf_callback=None)
                     await pdf_gen(
                         tp_list,
                         output_dir=session["pdf_dir"],
@@ -260,11 +258,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         ),
                         send_pdf_callback=None,
                     )
-                # Show buttons to download generated PDFs
+
+                    # Ensure files exist; if not, try moving from default pdf_gen dir
+                    for tp in tp_list:
+                        expected_path = os.path.join(session["pdf_dir"], f"{tp}.pdf")
+                        if not os.path.exists(expected_path):
+                            # Optional: check a fallback location
+                            fallback_path = os.path.join("pdf", f"{tp}.pdf")
+                            if os.path.exists(fallback_path):
+                                shutil.move(fallback_path, expected_path)
+                            else:
+                                logger.error("PDF for %s not found after generation", tp)
+
+                # Only show buttons for PDFs that really exist
                 keyboard = [
                     [InlineKeyboardButton(f"📎 {tp}.pdf", callback_data=f"pdf_{tp}")]
                     for tp in tp_list
+                    if os.path.exists(os.path.join(session["pdf_dir"], f"{tp}.pdf"))
                 ]
+                if not keyboard:
+                    await safe_send(query.message.chat.id, context, "❌ No PDFs could be generated.")
+                    return
+
                 keyboard.append([InlineKeyboardButton("❌ Exit", callback_data="exit_process")])
                 await context.bot.send_message(
                     chat_id=query.message.chat.id,
@@ -277,6 +292,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         asyncio.create_task(generate())
         return
+
 
     if query.data.startswith("pdf_"):
         tp_num = query.data.split("_", 1)[1]

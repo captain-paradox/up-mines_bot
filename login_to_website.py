@@ -4,16 +4,17 @@ import easyocr
 
 from emm11_processor import process_emm11
 
+# Initialize OCR once
 reader = easyocr.Reader(['en'], gpu=False)
 
-async def login_to_website(data, update, context,log_callback=None):
-    """Login and process eMM11 data for a single user session."""
-    user_id = update.effective_user.id
-    log_callback = lambda msg: asyncio.create_task(
-        context.bot.send_message(chat_id=user_id, text=msg)
-    )
+async def login_to_website(data, log_callback):
+    """
+    Login and process eMM11 data for a single user session.
+    data: list of dicts containing at least 'eMM11_num' keys
+    log_callback: async function(message: str) to send logs to user
+    """
 
-    aadhar_number = "855095518363"
+    aadhar_number = "855095518363"   # Replace with secure handling later
     password = "Nic@1616"
     max_attempts = 5
 
@@ -27,6 +28,7 @@ async def login_to_website(data, update, context,log_callback=None):
         context_browser = await browser.new_context()
         page = await context_browser.new_page()
 
+        # Load login page
         try:
             await page.goto("https://upmines.upsdc.gov.in/DefaultLicense.aspx", timeout=20000)
         except PlaywrightTimeoutError:
@@ -37,6 +39,7 @@ async def login_to_website(data, update, context,log_callback=None):
         await page.wait_for_timeout(2000)
         login_success = False
 
+        # Try login with captcha
         for attempt in range(1, max_attempts + 1):
             await log_callback(f"Attempt {attempt} of {max_attempts}...")
 
@@ -44,6 +47,7 @@ async def login_to_website(data, update, context,log_callback=None):
                 await page.fill("#ContentPlaceHolder1_txtAadharNumber", aadhar_number)
                 await page.fill("#ContentPlaceHolder1_txtPassword", password)
 
+                # Read captcha
                 captcha_elem = await page.query_selector("#Captcha")
                 captcha_bytes = await captcha_elem.screenshot()
                 result = reader.readtext(captcha_bytes, detail=0)
@@ -55,6 +59,7 @@ async def login_to_website(data, update, context,log_callback=None):
                     await page.wait_for_timeout(1500)
                     continue
 
+                # Fill captcha and submit
                 await page.fill("#ContentPlaceHolder1_txtCaptcha", captcha_text)
                 await page.click("#ContentPlaceHolder1_btn_captcha")
 
@@ -85,6 +90,7 @@ async def login_to_website(data, update, context,log_callback=None):
             await browser.close()
             return
 
+        # Process eMM11 data
         try:
             emm11_numbers_list = [record["eMM11_num"] for record in data if "eMM11_num" in record]
             await process_emm11(page, emm11_numbers_list, log_callback)
