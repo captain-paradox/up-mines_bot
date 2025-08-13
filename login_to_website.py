@@ -6,7 +6,7 @@ from emm11_processor import process_emm11
 
 reader = easyocr.Reader(['en'], gpu=False)
 
-async def login_to_website(data, update, context):
+async def login_to_website(data, update, context,log_callback=None):
     """Login and process eMM11 data for a single user session."""
     user_id = update.effective_user.id
     log_callback = lambda msg: asyncio.create_task(
