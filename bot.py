@@ -21,9 +21,9 @@ from telegram.ext import (
     filters,
 )
 
-import fetch_emm11_data
-import login_to_website
-import pdf_gen
+from fetch_emm11_data import fetch_emm11_data
+from login_to_website import login_to_website
+from pdf_gen import pdf_gen
 
 # Optional: load BOT_TOKEN from .env if available
 try:
