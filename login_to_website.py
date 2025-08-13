@@ -41,7 +41,7 @@ async def login_to_website(data, log_callback):
 
         # Try login with captcha
         for attempt in range(1, max_attempts + 1):
-            await log_callback(f"Attempt {attempt} of {max_attempts}...")
+            # await log_callback(f"Attempt {attempt} of {max_attempts}...")
 
             try:
                 await page.fill("#ContentPlaceHolder1_txtAadharNumber", aadhar_number)
@@ -71,22 +71,22 @@ async def login_to_website(data, log_callback):
                         await dialog.accept()
 
                     page.once("dialog", handle_dialog)
-                    await log_callback("✅ Login successful!")
+                    # await log_callback("✅ Login successful!")
                     await page.wait_for_timeout(1500)
                     break
 
                 except PlaywrightTimeoutError:
-                    await log_callback("⚠️ Login failed, retrying...")
+                    # await log_callback("⚠️ Login failed, retrying...")
                     await page.reload()
                     await page.wait_for_timeout(2000)
 
             except Exception as e:
-                await log_callback(f"⚠️ Error: {e}, retrying...")
+                # await log_callback(f"⚠️ Error: {e}, retrying...")
                 await page.reload()
                 await page.wait_for_timeout(2000)
 
         if not login_success:
-            await log_callback("❌ Could not log in after multiple attempts.")
+            # await log_callback("❌ Could not log in after multiple attempts.")
             await browser.close()
             return
 
@@ -98,4 +98,4 @@ async def login_to_website(data, log_callback):
             await log_callback(f"❌ Error during eMM11 processing: {e}")
 
         await browser.close()
-        await log_callback("✅ Process completed.")
+        # await log_callback("✅ Process completed.")

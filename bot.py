@@ -6,6 +6,7 @@ import os
 import asyncio
 import logging
 import shutil
+import time
 import uuid
 import nest_asyncio  # for environments where an event loop is already running (e.g., Jupyter)
 from typing import Dict, Any
@@ -231,7 +232,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
                 await context.bot.send_message(
                     chat_id=query.message.chat.id,
-                    text="✅ Processing done. Click below to generate PDF.",
+                    text="Click below to generate PDF.",
                     reply_markup=InlineKeyboardMarkup(keyboard),
                 )
             except Exception as e:
@@ -334,6 +335,20 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📄 PDFs dir: {session.get('pdf_dir')}"
     )
 
+async def cleanup_expired_sessions():
+    while True:
+        now = time.time()
+        expired_users = []
+        for user_id, session in list(user_sessions.items()):
+            created_at = session.get("created_at", now)
+            if now - created_at > 12 * 3600:  # 12 hours in seconds
+                expired_users.append(user_id)
+
+        for user_id in expired_users:
+            logger.info(f"🧹 Auto-cleaning expired session for user {user_id}")
+            cleanup_user(user_id)
+
+        await asyncio.sleep(3600)  # check every hour
 
 # ---------- Boot ----------
 async def run_bot():
@@ -353,7 +368,7 @@ async def run_bot():
         name="main_conversation",
         persistent=False,
     )
-
+    asyncio.create_task(cleanup_expired_sessions())
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(CommandHandler("status", status))
