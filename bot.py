@@ -1,43 +1,100 @@
+# bot.py
+# Compatible with: python-telegram-bot==20.8
+# Python >= 3.8
+
 import os
 import asyncio
+import logging
 import shutil
 import uuid
+import nest_asyncio  # for environments where an event loop is already running (e.g., Jupyter)
+from typing import Dict, Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    filters,
     CallbackQueryHandler,
     ConversationHandler,
     ContextTypes,
+    filters,
 )
 
-from fetch_emm11_data import fetch_emm11_data
-from login_to_website import login_to_website
-from pdf_gen import pdf_gen
+import fetch_emm11_data
+import login_to_website
+import pdf_gen
 
-BOT_TOKEN = "7933257148:AAHf7HUyBtjQbnzlUqJpGwz0S2yJfC33mqw"
-#kk 1
+# Optional: load BOT_TOKEN from .env if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7933257148:AAHf7HUyBtjQbnzlUqJpGwz0S2yJfC33mqw")
+
+# Conversation states
 ASK_START, ASK_END, ASK_DISTRICT = range(3)
 
-# Stores user sessions: {user_id: {...}}
-user_sessions = {}
+# Per-user in-memory sessions
+# user_sessions[user_id] = {
+#   start, end, district, data[list], tp_num_list[list], user_dir, pdf_dir, lock(asyncio.Lock)
+# }
+user_sessions: Dict[int, Dict[str, Any]] = {}
+
+# ---------- Logging ----------
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger("up-mines-bot")
 
 
-def create_user_dir(user_id):
-    """Create isolated session folder for this user."""
+# ---------- Helpers ----------
+def create_user_dir(user_id: int) -> (str, str): # type: ignore
+    """Create isolated session folder for this user (unique per run)."""
     session_id = str(uuid.uuid4())[:8]
     user_dir = os.path.join("sessions", f"{user_id}_{session_id}")
-    os.makedirs(user_dir, exist_ok=True)
     pdf_dir = os.path.join(user_dir, "pdf")
     os.makedirs(pdf_dir, exist_ok=True)
     return user_dir, pdf_dir
 
 
+def cleanup_user(user_id: int):
+    """Delete session folder and remove from memory."""
+    session = user_sessions.pop(user_id, None)
+    if not session:
+        return
+    folder = session.get("user_dir")
+    if folder and os.path.isdir(folder):
+        try:
+            shutil.rmtree(folder)
+        except Exception as e:
+            logger.warning("Failed to cleanup user %s dir %s: %s", user_id, folder, e)
+
+
+async def safe_send(chat_id: int, context: ContextTypes.DEFAULT_TYPE, text: str):
+    """Send message with safety."""
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=text)
+    except Exception as e:
+        logger.error("Send message failed: %s", e)
+
+
+# ---------- Handlers ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    # Init a fresh session container with an asyncio lock to serialize this user's actions
+    if user_id not in user_sessions:
+        user_dir, pdf_dir = create_user_dir(user_id)
+        user_sessions[user_id] = {
+            "data": [],
+            "tp_num_list": [],
+            "user_dir": user_dir,
+            "pdf_dir": pdf_dir,
+            "lock": asyncio.Lock(),
+        }
     await update.message.reply_text("Welcome! Please enter the start number:")
     return ASK_START
 
@@ -65,70 +122,72 @@ async def ask_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ask_district(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    district = update.message.text
+    district = update.message.text.strip()
     user_id = update.effective_user.id
-    start = context.user_data["start"]
-    end = context.user_data["end"]
+    start = context.user_data.get("start")
+    end = context.user_data.get("end")
 
-    # Create isolated session folder
-    user_dir, pdf_dir = create_user_dir(user_id)
+    # Ensure user session exists & has lock
+    if user_id not in user_sessions:
+        user_dir, pdf_dir = create_user_dir(user_id)
+        user_sessions[user_id] = {
+            "data": [],
+            "tp_num_list": [],
+            "user_dir": user_dir,
+            "pdf_dir": pdf_dir,
+            "lock": asyncio.Lock(),
+        }
 
-    # Store session data
-    user_sessions[user_id] = {
-        "start": start,
-        "end": end,
-        "district": district,
-        "data": [],
-        "tp_num_list": [],
-        "user_dir": user_dir,
-        "pdf_dir": pdf_dir,
-    }
+    # Update session core fields
+    session = user_sessions[user_id]
+    session["start"] = start
+    session["end"] = end
+    session["district"] = district
+    session["data"].clear()
+    session["tp_num_list"].clear()
 
     await update.message.reply_text(f"🔎 Fetching data for district: {district}...")
 
     async def send_entry(entry):
+        # Stream entries to the user as they arrive
         msg = (
-            f"{entry['eMM11_num']}\n"
-            f"{entry['destination_district']}\n"
-            f"{entry['destination_address']}\n"
-            f"{entry['quantity_to_transport']}\n"
-            f"{entry['generated_on']}"
+            f"{entry.get('eMM11_num','')}\n"
+            f"{entry.get('destination_district','')}\n"
+            f"{entry.get('destination_address','')}\n"
+            f"{entry.get('quantity_to_transport','')}\n"
+            f"{entry.get('generated_on','')}"
         )
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
-        user_sessions[user_id]["data"].append(entry)
+        await safe_send(update.effective_chat.id, context, msg)
+        session["data"].append(entry)
 
     async def run_fetch():
-        await fetch_emm11_data(start, end, district, data_callback=send_entry)
+        try:
+            # Serialize this user's heavy operations
+            async with session["lock"]:
+                # Your function must be async; if it's sync, wrap with asyncio.to_thread
+                await fetch_emm11_data(start, end, district, data_callback=send_entry)
 
-        # Once finished
-        if user_sessions[user_id]["data"]:
-            keyboard = [
-                [InlineKeyboardButton("🔁 Start Again", callback_data="start_again")],
-                [InlineKeyboardButton("🔐 Login & Process", callback_data="login_process")],
-                [InlineKeyboardButton("❌ Exit", callback_data="exit_process")],
-            ]
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="✅ Data fetched. What would you like to do next?",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
-        else:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ No data found.")
-            cleanup_user(user_id)
+            if session["data"]:
+                keyboard = [
+                    [InlineKeyboardButton("🔁 Start Again", callback_data="start_again")],
+                    [InlineKeyboardButton("🔐 Login & Process", callback_data="login_process")],
+                    [InlineKeyboardButton("❌ Exit", callback_data="exit_process")],
+                ]
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="✅ Data fetched. What would you like to do next?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+            else:
+                await safe_send(update.effective_chat.id, context, "⚠️ No data found.")
+                cleanup_user(user_id)
+        except Exception as e:
+            logger.exception("Fetch failed for user %s: %s", user_id, e)
+            await safe_send(update.effective_chat.id, context, f"❌ Error while fetching: {e}")
 
+    # Run concurrently so other users aren't blocked
     asyncio.create_task(run_fetch())
     return ConversationHandler.END
-
-
-def cleanup_user(user_id):
-    """Delete session folder and remove from memory."""
-    if user_id in user_sessions:
-        folder = user_sessions[user_id]["user_dir"]
-        try:
-            shutil.rmtree(folder)
-        except:
-            pass
-        user_sessions.pop(user_id, None)
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -136,11 +195,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     await query.answer()
 
-    if user_id not in user_sessions:
+    session = user_sessions.get(user_id)
+    if not session:
         await query.edit_message_text("⚠️ Session expired. Please start again with /start.")
         return
-
-    session = user_sessions[user_id]
 
     if query.data == "start_again":
         await query.edit_message_text("🔁 Restarting...")
@@ -157,21 +215,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🔐 Logging in and processing data...")
 
         async def process_data():
-            async def log_callback(msg):
-                await context.bot.send_message(chat_id=query.message.chat.id, text=msg)
+            try:
+                async with session["lock"]:
+                    async def log_callback(msg):
+                        await safe_send(query.message.chat.id, context, msg)
 
-            await login_to_website(session["data"], log_callback=log_callback)
-            session["tp_num_list"] = [e["eMM11_num"] for e in session["data"]]
+                    # If login_to_website is blocking/sync, wrap it:
+                    # await asyncio.to_thread(login_to_website, session["data"], log_callback=log_callback)
+                    await login_to_website(session["data"], log_callback=log_callback)
 
-            keyboard = [
-                [InlineKeyboardButton("📄 Generate PDF", callback_data="generate_pdf")],
-                [InlineKeyboardButton("❌ Exit", callback_data="exit_process")],
-            ]
-            await context.bot.send_message(
-                chat_id=query.message.chat.id,
-                text="✅ Processing done. Click below to generate PDF.",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
+                    session["tp_num_list"] = [e.get("eMM11_num", "") for e in session["data"] if e.get("eMM11_num")]
+                keyboard = [
+                    [InlineKeyboardButton("📄 Generate PDF", callback_data="generate_pdf")],
+                    [InlineKeyboardButton("❌ Exit", callback_data="exit_process")],
+                ]
+                await context.bot.send_message(
+                    chat_id=query.message.chat.id,
+                    text="✅ Processing done. Click below to generate PDF.",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+            except Exception as e:
+                logger.exception("Login/process failed for user %s: %s", user_id, e)
+                await safe_send(query.message.chat.id, context, f"❌ Error during process: {e}")
 
         asyncio.create_task(process_data())
         return
@@ -179,47 +244,57 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "generate_pdf":
         tp_list = session.get("tp_num_list", [])
         if not tp_list:
-            await context.bot.send_message(chat_id=query.message.chat.id, text="⚠️ No TP numbers found.")
+            await safe_send(query.message.chat.id, context, "⚠️ No TP numbers found.")
             return
 
         async def generate():
-            await pdf_gen(
-                tp_list,
-                output_dir=session["pdf_dir"],  # SAVE PDFs PER USER
-                log_callback=lambda msg: asyncio.create_task(
-                    context.bot.send_message(chat_id=query.message.chat.id, text=msg)
-                ),
-                send_pdf_callback=None,
-            )
+            try:
+                async with session["lock"]:
+                    # If pdf_gen is CPU/IO heavy sync, wrap it:
+                    # await asyncio.to_thread(pdf_gen, tp_list, output_dir=session["pdf_dir"], log_callback=..., send_pdf_callback=None)
+                    await pdf_gen(
+                        tp_list,
+                        output_dir=session["pdf_dir"],
+                        log_callback=lambda msg: asyncio.create_task(
+                            safe_send(query.message.chat.id, context, msg)
+                        ),
+                        send_pdf_callback=None,
+                    )
+                # Show buttons to download generated PDFs
+                keyboard = [
+                    [InlineKeyboardButton(f"📎 {tp}.pdf", callback_data=f"pdf_{tp}")]
+                    for tp in tp_list
+                ]
+                keyboard.append([InlineKeyboardButton("❌ Exit", callback_data="exit_process")])
+                await context.bot.send_message(
+                    chat_id=query.message.chat.id,
+                    text="📄 Click to download your PDFs:",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+            except Exception as e:
+                logger.exception("PDF gen failed for user %s: %s", user_id, e)
+                await safe_send(query.message.chat.id, context, f"❌ Error during PDF generation: {e}")
 
         asyncio.create_task(generate())
-
-        keyboard = [
-            [InlineKeyboardButton(f"📎 {tp}.pdf", callback_data=f"pdf_{tp}")]
-            for tp in tp_list
-        ]
-        keyboard.append([InlineKeyboardButton("❌ Exit", callback_data="exit_process")])
-
-        await context.bot.send_message(
-            chat_id=query.message.chat.id,
-            text="📄 Click to download your PDFs:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
         return
 
     if query.data.startswith("pdf_"):
         tp_num = query.data.split("_", 1)[1]
         pdf_path = os.path.join(session["pdf_dir"], f"{tp_num}.pdf")
         if os.path.exists(pdf_path):
-            with open(pdf_path, "rb") as f:
-                await context.bot.send_document(
-                    chat_id=query.message.chat.id,
-                    document=f,
-                    filename=f"{tp_num}.pdf",
-                    caption=f"📎 TP: {tp_num}",
-                )
+            try:
+                with open(pdf_path, "rb") as f:
+                    await context.bot.send_document(
+                        chat_id=query.message.chat.id,
+                        document=f,
+                        filename=f"{tp_num}.pdf",
+                        caption=f"📎 TP: {tp_num}",
+                    )
+            except Exception as e:
+                logger.error("Sending PDF failed: %s", e)
+                await safe_send(query.message.chat.id, context, "❌ Failed to send PDF.")
         else:
-            await context.bot.send_message(chat_id=query.message.chat.id, text="❌ PDF not found.")
+            await safe_send(query.message.chat.id, context, "❌ PDF not found.")
         return
 
 
@@ -229,11 +304,28 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def main():
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Simple health/status command per user."""
+    user_id = update.effective_user.id
+    session = user_sessions.get(user_id)
+    if not session:
+        await update.message.reply_text("No active session. Use /start to begin.")
+        return
+    count = len(session.get("data", []))
+    await update.message.reply_text(
+        f"👤 User: {user_id}\n"
+        f"📦 Entries fetched: {count}\n"
+        f"📄 PDFs dir: {session.get('pdf_dir')}"
+    )
+
+
+# ---------- Boot ----------
+async def run_bot():
     os.makedirs("sessions", exist_ok=True)
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # Conversation
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -242,14 +334,31 @@ async def main():
             ASK_DISTRICT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_district)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        name="main_conversation",
+        persistent=False,
     )
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("cancel", cancel))
 
-    print("🤖 Bot is running...")
-    await app.run_polling()
+    logger.info("🤖 Bot is starting...")
+    await app.run_polling(
+        allowed_updates=None,              # PTB manages what it needs
+        stop_signals=None,                 # PTB handles signals internally
+        close_loop=False,                  # prevents closing an external running loop
+    )
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(run_bot())
+    except RuntimeError as e:
+        # Works in notebooks/async shells too
+        if "already running" in str(e):
+            nest_asyncio.apply()
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(run_bot())
+        else:
+            raise

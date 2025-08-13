@@ -1,3 +1,4 @@
+# fetch_emm11_data.py
 import asyncio
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
@@ -38,7 +39,6 @@ async def fetch_single_emm11(playwright, emm11_num, district, log=print):
 
 async def fetch_emm11_data(start_num, end_num, district, data_callback=None, log=print):
     results = []
-
     async with async_playwright() as playwright:
         semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 

@@ -1,8 +1,30 @@
 from playwright.async_api import Page
 from pdf_gen import pdf_gen
+import os
 
+async def process_emm11(
+    page: Page,
+    emm11_numbers_list,
+    log_callback=None,
+    send_pdf_callback=None,
+    user_id=None
+):
+    """
+    Process eMM11 numbers and optionally send results as a PDF via Telegram.
 
-async def process_emm11(page: Page, emm11_numbers_list, log_callback=print, send_pdf_callback=None):
+    Args:
+        page (Page): Playwright page instance.
+        emm11_numbers_list (list): List of eMM11 numbers to check.
+        log_callback (coroutine): Async function for sending logs to user.
+        send_pdf_callback (coroutine): Async function for sending PDF to user.
+        user_id (int): Telegram user ID (required for sending files).
+    """
+    async def log(msg):
+        if log_callback:
+            await log_callback(msg)
+        else:
+            print(msg)
+
     try:
         master_menu = page.locator("//a[normalize-space()='Master Entries']")
         await master_menu.wait_for(state="visible", timeout=6000)
@@ -28,23 +50,26 @@ async def process_emm11(page: Page, emm11_numbers_list, log_callback=print, send
                 error_locator = page.locator("#ContentPlaceHolder1_ErrorLbl")
                 if await error_locator.is_visible():
                     error_text = await error_locator.inner_text()
-
-                    tp_num = str(tp_num)
                     if "not generated for storage license" in error_text:
-                        log_callback(f"{tp_num}\n : Unused")
-                        tp_num_list.append(tp_num)
+                        await log(f"{tp_num} : ❌ Unused")
+                        tp_num_list.append(str(tp_num))
                 else:
-		   
-                    log_callback(f"TP Number: {tp_num}\n✅ No error detected or form submitted.")
+                    await log(f"TP Number: {tp_num} ✅ No error detected or form submitted.")
             except Exception as e:
-                log_callback(f"⚠️ TP Number: {tp_num} - Failed to process due to: {e}")
+                await log(f"⚠️ TP Number: {tp_num} - Failed to process due to: {e}")
 
         if tp_num_list:
-            print("pdf")
-            # log_callback(f"📄 Preparing to generate PDFs for {len(tp_num_list)} eligible TP numbers.")
-            return tp_num_list
+            await log(f"📄 Generating PDF for {len(tp_num_list)} eligible TP numbers...")
+            pdf_path = await pdf_gen(tp_num_list)
+
+            if send_pdf_callback and user_id:
+                await send_pdf_callback(user_id, pdf_path)
+
+            # Optional cleanup
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
         else:
-            log_callback("ℹ️ No eligible TP numbers found for PDF generation.")
+            await log("ℹ️ No eligible TP numbers found for PDF generation.")
 
     except Exception as e:
-        log_callback(f"🔥 Fatal error in process_emm11: {e}")
+        await log(f"🔥 Fatal error in process_emm11: {e}")
